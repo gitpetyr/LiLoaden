@@ -97,6 +97,12 @@ class GenerationTests(unittest.TestCase):
             self.assertIn("find_package(OpenSSL REQUIRED COMPONENTS Crypto)", generated_cmake)
             self.assertIn("find_package(LibLZMA REQUIRED)", generated_cmake)
             self.assertIn("OpenSSL::Crypto LibLZMA::LibLZMA", generated_cmake)
+            self.assertIn('option(ENABLE_OLLVM "Enable OLLVM obfuscation', generated_cmake)
+            self.assertIn('"-mllvm;-fla;-mllvm;-bcf;-mllvm;-sub"', generated_cmake)
+            self.assertIn(
+                "target_compile_options(payload_decoder PRIVATE ${OLLVM_COMPILE_OPTIONS})",
+                generated_cmake,
+            )
 
             generated_main = (output / "src/main.cpp").read_text(encoding="utf-8")
             self.assertNotIn("std::cout", generated_main)

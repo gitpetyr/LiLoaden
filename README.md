@@ -31,6 +31,26 @@ cmake --build generated-project/build
 generated-project/build/payload_decoder restored.bin
 ```
 
+生成的 CMake 工程提供 `ENABLE_OLLVM` 选项。使用基于 OLLVM 的 Clang 配置工程：
+
+```bash
+cmake -S generated-project -B generated-project/build \
+  -DCMAKE_CXX_COMPILER=/path/to/ollvm-clang++ \
+  -DENABLE_OLLVM=ON
+cmake --build generated-project/build
+```
+
+默认混淆参数为控制流扁平化、虚假控制流和指令替换：
+`-mllvm;-fla;-mllvm;-bcf;-mllvm;-sub`。不同 OLLVM 分支的参数可能不同，
+可在配置时覆盖缓存变量：
+
+```bash
+cmake -S generated-project -B generated-project/build \
+  -DCMAKE_CXX_COMPILER=/path/to/ollvm-clang++ \
+  -DENABLE_OLLVM=ON \
+  -DOLLVM_COMPILE_OPTIONS='-mllvm;-fla'
+```
+
 ## 目录
 
 ```text

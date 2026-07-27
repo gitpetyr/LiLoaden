@@ -27,6 +27,21 @@ target_compile_features(payload_decoder PRIVATE cxx_std_17)
 target_include_directories(payload_decoder PRIVATE include)
 target_link_libraries(payload_decoder PRIVATE {libraries})
 
+option(ENABLE_OLLVM "Enable OLLVM obfuscation for payload_decoder" OFF)
+set(
+    OLLVM_COMPILE_OPTIONS
+    "-mllvm;-fla;-mllvm;-bcf;-mllvm;-sub"
+    CACHE STRING
+    "Semicolon-separated OLLVM compiler options"
+)
+
+if(ENABLE_OLLVM)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "ENABLE_OLLVM requires an OLLVM-based Clang compiler")
+    endif()
+    target_compile_options(payload_decoder PRIVATE ${{OLLVM_COMPILE_OPTIONS}})
+endif()
+
 if(MSVC)
     target_compile_options(payload_decoder PRIVATE /W4 /permissive-)
 else()
