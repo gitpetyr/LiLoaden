@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
-from . import lzma_aes_ipv6
+from . import ipv6, lzma_aes_ipv6
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,10 @@ class EncoderModule(Protocol):
     def cpp_decoder(self, namespace: str) -> CppDecoder: ...
 
 
-_ENCODERS: dict[str, EncoderModule] = {lzma_aes_ipv6.NAME: lzma_aes_ipv6}
+_ENCODERS: dict[str, EncoderModule] = {
+    ipv6.NAME: ipv6,
+    lzma_aes_ipv6.NAME: lzma_aes_ipv6,
+}
 
 
 def available_encoders() -> tuple[str, ...]:

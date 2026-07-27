@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ KEY_HEX = "00112233445566778899aabbccddeeff"
 
 class GenerationTests(unittest.TestCase):
     def test_encoder_registry_dispatches_to_common_entry_point(self) -> None:
+        self.assertIn("ipv6", available_encoders())
         self.assertIn("lzma-aes-ipv6", available_encoders())
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -31,6 +33,26 @@ class GenerationTests(unittest.TestCase):
             )
             self.assertEqual(result[0], source.stat().st_size)
             self.assertTrue(output.is_file())
+
+    def test_ipv6_encoder_round_trips_raw_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "input.bin"
+            output = root / "payload.h"
+            expected = bytes(range(35))
+            source.write_bytes(expected)
+
+            size, count = encode("ipv6", source, output)
+
+            addresses = []
+            for line in output.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if stripped.startswith('"'):
+                    addresses.append(stripped.strip('",'))
+            restored = b"".join(ipaddress.IPv6Address(item).packed for item in addresses)
+            self.assertEqual(size, len(expected))
+            self.assertEqual(count, 3)
+            self.assertEqual(restored[:size], expected)
 
     def test_encoder_module_exposes_cpp_decoder_contract(self) -> None:
         encoder = get_encoder("lzma-aes-ipv6")
@@ -64,6 +86,12 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(args.key_hex, KEY_HEX)
         self.assertEqual(args.chunk_size, 8192)
 
+        ipv6_args = parse_args(
+            ["input.bin", "generated", "--encoder", "ipv6"]
+        )
+        self.assertEqual(ipv6_args.encoder, "ipv6")
+        self.assertFalse(hasattr(ipv6_args, "key_hex"))
+
     def test_encode_file_writes_payload_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -71,15 +99,46 @@ class GenerationTests(unittest.TestCase):
             output = root / "payload.h"
             source.write_bytes(b"LiLoaden test payload" * 32)
 
-            original_size, _, compressed_size, count = encode_file(
+            original_size, _, encrypted_size, count = encode_file(
                 source, output, bytes.fromhex(KEY_HEX), chunk_size=4096
             )
 
             header = output.read_text(encoding="utf-8")
             self.assertEqual(original_size, source.stat().st_size)
             self.assertIn(f"kOriginalSize = {original_size}", header)
-            self.assertIn(f"kCompressedSize = {compressed_size}", header)
+            self.assertIn(f"kEncryptedSize = {encrypted_size}", header)
+            self.assertIn("LZMA/XZ -> AES-GCM -> IPv6", header)
             self.assertIn(f"array<const char*, {count}>", header)
+
+            first_address = next(
+                line.strip().strip('",')
+                for line in header.splitlines()
+                if line.strip().startswith('"')
+            )
+            self.assertEqual(ipaddress.IPv6Address(first_address).packed[:4], b"LIL3")
+
+    def test_main_generates_raw_ipv6_project_without_crypto_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "input.bin"
+            output = root / "generated"
+            source.write_bytes(b"raw ipv6 project")
+            arguments = [
+                "generate_cmake_project.py",
+                str(source),
+                str(output),
+                "--encoder",
+                "ipv6",
+            ]
+
+            with patch.object(sys, "argv", arguments):
+                self.assertEqual(main(), 0)
+
+            self.assertFalse((output / "include/payload_key.h").exists())
+            cmake = (output / "CMakeLists.txt").read_text(encoding="utf-8")
+            self.assertNotIn("OpenSSL", cmake)
+            self.assertNotIn("LibLZMA", cmake)
+            self.assertNotIn("target_link_libraries(payload_decoder PRIVATE )", cmake)
 
     def test_main_generates_expected_cmake_layout(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

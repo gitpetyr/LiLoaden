@@ -25,7 +25,7 @@ add_executable(payload_decoder
 )
 target_compile_features(payload_decoder PRIVATE cxx_std_17)
 target_include_directories(payload_decoder PRIVATE include)
-target_link_libraries(payload_decoder PRIVATE {libraries})
+{link_libraries}
 
 option(ENABLE_OLLVM "Enable OLLVM obfuscation for payload_decoder" OFF)
 set(
@@ -51,14 +51,15 @@ endif()
 
 MAIN_CPP = r'''#include "payload_decoder.h"
 #ifdef _WIN32
+#define NOMINMAX
 #include <windows.h>
 #else
 #include <sys/mman.h>
 #endif
-#include <fstream>
+#include <cstring>
 #include <stdexcept>
 
-int main(int argc, char** argv) {
+int main() {
     try {
         char* data = nullptr;
         std::size_t size = 0;
@@ -116,7 +117,7 @@ int main(int argc, char** argv) {
 def _parser(encoder_name: str) -> argparse.ArgumentParser:
     encoder = get_encoder(encoder_name)
     parser = argparse.ArgumentParser(
-        description="Generate a cross-platform CMake project with an embedded, encrypted payload.",
+        description="Generate a cross-platform CMake project with an embedded payload.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         epilog=encoder.CLI_EPILOG,
     )
@@ -175,7 +176,13 @@ def main() -> int:
             decoder = encoder.cpp_decoder(PAYLOAD_NAMESPACE)
             cmake = CMAKE_TEMPLATE.format(
                 packages="\n".join(decoder.cmake_packages),
-                libraries=" ".join(decoder.cmake_libraries),
+                link_libraries=(
+                    "target_link_libraries(payload_decoder PRIVATE "
+                    + " ".join(decoder.cmake_libraries)
+                    + ")"
+                    if decoder.cmake_libraries
+                    else ""
+                ),
             )
             write_text(project / "CMakeLists.txt", cmake)
             for name, content in artifacts.headers.items():

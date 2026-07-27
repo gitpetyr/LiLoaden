@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stream LZMA -> AES-GCM -> LZMA and emit the result as IPv6 literals."""
+"""Stream LZMA -> AES-GCM and emit the result as IPv6 literals."""
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ try:
 except ImportError as exc:
     raise SystemExit("Missing dependency 'cryptography'. Run: python -m pip install -r requirements.txt") from exc
 
-MAGIC = b"LIL2"
-AAD = b"LiLoaden:LZMA:AES-GCM:LZMA:IPv6:v2"
+MAGIC = b"LIL3"
+AAD = b"LiLoaden:LZMA:AES-GCM:IPv6:v3"
 CHUNK_SIZE = 1024 * 1024
 
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Stream data through LZMA, AES-GCM, and LZMA, then emit an IPv6 C++ header.",
+        description="Compress data with LZMA, encrypt it with AES-GCM, then emit an IPv6 C++ header.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         epilog="Example: %(prog)s input.bin payload.h --key-file aes.key",
     )
@@ -106,10 +106,10 @@ def write_header(
                 "#include <array>\n#include <cstddef>\n#include <string_view>\n\n"
                 f"namespace {namespace} {{\n\n"
                 f'inline constexpr std::string_view kCipher = "AES-{key_bits}-GCM";\n'
-                'inline constexpr std::string_view kPipeline = "LZMA/XZ -> AES-GCM -> LZMA/XZ";\n'
+                'inline constexpr std::string_view kPipeline = "LZMA/XZ -> AES-GCM -> IPv6";\n'
                 f"inline constexpr std::size_t kOriginalSize = {original_size};\n"
                 f"inline constexpr std::size_t kInnerCompressedSize = {inner_size};\n"
-                f"inline constexpr std::size_t kCompressedSize = {payload_size};\n"
+                f"inline constexpr std::size_t kEncryptedSize = {payload_size};\n"
                 f"inline constexpr std::array<const char*, {count}> kIpv6Payload{{{{\n"
             )
             with payload.open("rb") as data:
@@ -153,17 +153,16 @@ def encode_file(
         prefix="liloaden-", dir=str(temp_dir) if temp_dir else None
     ) as directory:
         work = Path(directory)
-        inner, encrypted, outer = work / "inner.xz", work / "encrypted.bin", work / "outer.xz"
+        inner, encrypted = work / "inner.xz", work / "encrypted.bin"
         compress(source, inner, chunk_size)
         inner_size = inner.stat().st_size
         encrypt(inner, encrypted, key, chunk_size)
-        compress(encrypted, outer, chunk_size)
-        outer_size = outer.stat().st_size
+        encrypted_size = encrypted.stat().st_size
         count = write_header(
-            source, output, namespace, outer,
+            source, output, namespace, encrypted,
             original_size, inner_size, len(key) * 8
         )
-    return original_size, inner_size, outer_size, count
+    return original_size, inner_size, encrypted_size, count
 
 
 def main() -> int:
@@ -171,7 +170,7 @@ def main() -> int:
     try:
         validate(args)
         key = load_key(args)
-        original_size, inner_size, outer_size, count = encode_file(
+        original_size, inner_size, encrypted_size, count = encode_file(
             args.input, args.output, key, args.namespace, args.chunk_size, args.temp_dir
         )
     except (OSError, ValueError, lzma.LZMAError) as exc:
@@ -179,7 +178,7 @@ def main() -> int:
         return 1
     print(
         f"Generated {args.output}: {original_size} -> {inner_size} -> "
-        f"{outer_size} bytes, {count} IPv6 addresses"
+        f"{encrypted_size} bytes, {count} IPv6 addresses"
     )
     return 0
 

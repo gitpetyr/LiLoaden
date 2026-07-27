@@ -1,4 +1,4 @@
-"""LZMA -> AES-GCM -> LZMA encoder with IPv6-literal output."""
+"""LZMA -> AES-GCM encoder with IPv6-literal output."""
 
 from __future__ import annotations
 
@@ -154,7 +154,7 @@ CPP_DECODER_SOURCE = r'''#include "payload_decoder.h"
 
 namespace {
 
-constexpr std::string_view kAad = "LiLoaden:LZMA:AES-GCM:LZMA:IPv6:v2";
+constexpr std::string_view kAad = "LiLoaden:LZMA:AES-GCM:IPv6:v3";
 constexpr std::size_t kEnvelopeHeaderSize = 4 + 1 + 12;
 constexpr std::size_t kTagSize = 16;
 
@@ -219,10 +219,10 @@ std::vector<std::uint8_t> decode_ipv6_payload() {
         const auto block = parse_ipv6(address);
         result.insert(result.end(), block.begin(), block.end());
     }
-    if (result.size() < embedded_payload::kCompressedSize) {
+    if (result.size() < embedded_payload::kEncryptedSize) {
         throw std::runtime_error("truncated IPv6 payload");
     }
-    result.resize(embedded_payload::kCompressedSize);
+    result.resize(embedded_payload::kEncryptedSize);
     return result;
 }
 
@@ -271,7 +271,7 @@ void check_openssl(int status, const char* message) {
 std::vector<std::uint8_t> decrypt_envelope(const std::vector<std::uint8_t>& envelope) {
     if (envelope.size() < kEnvelopeHeaderSize + kTagSize ||
         envelope[0] != 'L' || envelope[1] != 'I' ||
-        envelope[2] != 'L' || envelope[3] != '2') {
+        envelope[2] != 'L' || envelope[3] != '3') {
         throw std::runtime_error("invalid encrypted envelope");
     }
     if (envelope[4] != embedded_key::kKey.size()) {
@@ -338,11 +338,7 @@ PayloadBuffer& PayloadBuffer::operator=(PayloadBuffer&& other) noexcept {
 }
 
 PayloadBuffer decode_payload(char*& data, std::size_t& size) {
-    auto outer_compressed = decode_ipv6_payload();
-    auto envelope = decompress_xz(outer_compressed);
-    outer_compressed.clear();
-    outer_compressed.shrink_to_fit();
-
+    auto envelope = decode_ipv6_payload();
     auto inner_compressed = decrypt_envelope(envelope);
     envelope.clear();
     envelope.shrink_to_fit();

@@ -3,6 +3,11 @@
 LiLoaden 将任意二进制文件压缩、使用 AES-GCM 加密，并生成一个可独立构建的
 CMake/C++ 解码工程。主入口是 `generate_cmake_project.py`。
 
+当前提供两种编码器：
+
+- `lzma-aes-ipv6`：`LZMA/XZ -> AES-GCM -> IPv6`。
+- `ipv6`：直接将二进制按 16 字节分组转换为 IPv6 地址，不压缩也不加密。
+
 ## 安装
 
 ```bash
@@ -21,6 +26,12 @@ python3 generate_cmake_project.py input.bin generated-project \
 
 ```bash
 python3 generate_cmake_project.py input.bin generated-project --key-file aes.key
+```
+
+直接生成 IPv6 地址列表工程不需要密钥参数：
+
+```bash
+python3 generate_cmake_project.py input.bin generated-project --encoder ipv6
 ```
 
 输出工程依赖 CMake 3.16+、C++17、OpenSSL Crypto 和 LibLZMA：
@@ -58,6 +69,7 @@ generate_cmake_project.py        命令行入口
 liloaden/
   encoder/
     __init__.py                  编码器协议、注册表和统一分发入口
+    ipv6.py                      原始二进制与 IPv6 地址列表互转模块
     lzma_aes_ipv6.py             Python 编码与配套 C++ 解码模块
   project_generator.py          通用 CMake 工程生成逻辑
   payload_encoder.py            流式压缩、加密及 IPv6 头文件编码
