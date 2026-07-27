@@ -159,7 +159,7 @@ def _write_base85_header(
                 f"inline constexpr std::size_t kOriginalSize = {original_size};\n"
                 f"inline constexpr std::size_t kEncryptedSize = {encrypted_size};\n"
                 f"inline constexpr std::size_t kBase85EncodedSize = {encoded_size};\n"
-                f"inline constexpr std::array<std::string_view, {count}> kBase85Payload{{{{\n"
+                f"inline constexpr std::array<const char*, {count}> kBase85Payload{{{{\n"
             )
             writer = _Base85LiteralWriter(header, BASE85_CHARS_PER_LITERAL)
             writer.write(MAGIC + bytes((len(key),)) + nonce)
@@ -331,7 +331,8 @@ std::vector<std::uint8_t> decode_base85_payload() {
 
     std::vector<std::uint8_t> result(padded_size);
     std::size_t offset = 0;
-    for (std::string_view chunk : embedded_payload::kBase85Payload) {
+    for (const char* chunk_cstr : embedded_payload::kBase85Payload) {
+        const std::string_view chunk(chunk_cstr);
         if (chunk.size() % 5 != 0) {
             throw std::runtime_error("misaligned Base85 chunk");
         }
