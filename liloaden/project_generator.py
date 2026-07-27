@@ -50,7 +50,11 @@ endif()
 '''
 
 MAIN_CPP = r'''#include "payload_decoder.h"
-
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#endif
 #include <fstream>
 #include <stdexcept>
 
@@ -88,7 +92,7 @@ int main(int argc, char** argv) {
             -1, 
             0
         );
-        if (exec_mem == MAP_FAILED) return nullptr;
+        if (exec_mem == MAP_FAILED) return 0;
 
         std::memcpy(exec_mem, data, size);
 
@@ -109,19 +113,15 @@ int main(int argc, char** argv) {
 }
 '''
 
-def parse_args() -> argparse.Namespace:
+def _parser(encoder_name: str) -> argparse.ArgumentParser:
+    encoder = get_encoder(encoder_name)
     parser = argparse.ArgumentParser(
         description="Generate a cross-platform CMake project with an embedded, encrypted payload.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        epilog="Example: %(prog)s input.bin generated-project --key-hex 00112233445566778899aabbccddeeff",
+        epilog=encoder.CLI_EPILOG,
     )
     parser.add_argument("input", type=Path, metavar="INPUT", help="binary file to embed")
     parser.add_argument("output", type=Path, metavar="OUTPUT_DIR", help="destination directory; it must not already exist")
-    keys = parser.add_mutually_exclusive_group(required=True)
-    keys.add_argument("--key-hex", metavar="HEX", help="AES key as exactly 32, 48, or 64 hexadecimal characters")
-    keys.add_argument("--key-file", type=Path, metavar="FILE", help="file containing exactly 16, 24, or 32 raw AES key bytes")
-    parser.add_argument("--chunk-size", type=int, default=1024 * 1024, metavar="BYTES", help="streaming I/O chunk size; must be at least 4096 bytes")
-    parser.add_argument("--temp-dir", type=Path, metavar="DIR", help="intermediate-file directory (system temporary directory if omitted)")
     parser.add_argument(
         "--encoder",
         choices=available_encoders(),
@@ -129,31 +129,17 @@ def parse_args() -> argparse.Namespace:
         metavar="ENCODER",
         help="payload encoder; available choices: %(choices)s",
     )
-    return parser.parse_args()
+    encoder.add_cli_arguments(parser)
+    return parser
 
 
-def read_key(args: argparse.Namespace) -> bytes:
-    try:
-        key = (
-            bytes.fromhex(args.key_hex)
-            if args.key_hex is not None
-            else args.key_file.read_bytes()
-        )
-    except ValueError as exc:
-        raise ValueError("--key-hex must be a valid hexadecimal string") from exc
-    if len(key) not in (16, 24, 32):
-        raise ValueError("the AES key must contain exactly 16, 24, or 32 bytes")
-    return key
-
-
-def key_header(key: bytes) -> str:
-    values = ", ".join(f"0x{value:02x}" for value in key)
-    return (
-        "#pragma once\n\n#include <array>\n#include <cstdint>\n\n"
-        "namespace embedded_key {\n"
-        f"inline constexpr std::array<std::uint8_t, {len(key)}> kKey{{{{{values}}}}};\n"
-        "}  // namespace embedded_key\n"
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    selector = argparse.ArgumentParser(add_help=False)
+    selector.add_argument(
+        "--encoder", choices=available_encoders(), default="lzma-aes-ipv6"
     )
+    selected, _ = selector.parse_known_args(argv)
+    return _parser(selected.encoder).parse_args(argv)
 
 
 def write_text(path: Path, content: str) -> None:
@@ -168,7 +154,6 @@ def main() -> int:
             raise ValueError(f"input does not exist or is not a regular file: {args.input}")
         if args.output.exists():
             raise ValueError(f"output directory already exists: {args.output}")
-        key = read_key(args)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
             prefix=f".{args.output.name}.", dir=args.output.parent
@@ -180,13 +165,11 @@ def main() -> int:
             source.mkdir(parents=True)
 
             encoder = get_encoder(args.encoder)
-            encoder.encode(
+            artifacts = encoder.encode_from_cli(
+                args=args,
                 source=args.input.resolve(),
                 output=include / "payload.h",
-                key=key,
                 namespace=PAYLOAD_NAMESPACE,
-                chunk_size=args.chunk_size,
-                temp_dir=args.temp_dir.resolve() if args.temp_dir else None,
             )
 
             decoder = encoder.cpp_decoder(PAYLOAD_NAMESPACE)
@@ -195,7 +178,8 @@ def main() -> int:
                 libraries=" ".join(decoder.cmake_libraries),
             )
             write_text(project / "CMakeLists.txt", cmake)
-            write_text(include / "payload_key.h", key_header(key))
+            for name, content in artifacts.headers.items():
+                write_text(include / name, content)
             write_text(include / "payload_decoder.h", decoder.header)
             write_text(source / "payload_decoder.cpp", decoder.source)
             write_text(source / "main.cpp", MAIN_CPP)

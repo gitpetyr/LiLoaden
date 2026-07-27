@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Mapping, Protocol
 
 from . import lzma_aes_ipv6
 
@@ -19,14 +20,28 @@ class CppDecoder:
     cmake_libraries: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class EncoderArtifacts:
+    """Additional generated files owned by an encoder implementation."""
+
+    headers: Mapping[str, str]
+
+
 class EncoderModule(Protocol):
     NAME: str
-    CHUNK_SIZE: int
+    CLI_EPILOG: str
 
-    def encode(
-        self, source: Path, output: Path, key: bytes, namespace: str,
-        chunk_size: int, temp_dir: Path | None,
-    ) -> tuple[int, int, int, int]: ...
+    def add_cli_arguments(self, parser: argparse.ArgumentParser) -> None: ...
+
+    def encode_from_cli(
+        self,
+        args: argparse.Namespace,
+        source: Path,
+        output: Path,
+        namespace: str,
+    ) -> EncoderArtifacts: ...
+
+    def encode(self, source: Path, output: Path, **options: Any) -> Any: ...
 
     def cpp_decoder(self, namespace: str) -> CppDecoder: ...
 
@@ -51,14 +66,18 @@ def encode(
     encoder: str,
     source: Path,
     output: Path,
-    key: bytes,
-    namespace: str = "liloaden_payload",
-    chunk_size: int = lzma_aes_ipv6.CHUNK_SIZE,
-    temp_dir: Path | None = None,
-) -> tuple[int, int, int, int]:
-    """Encode a file through the selected encoder's common entry point."""
+    **options: Any,
+) -> Any:
+    """Dispatch encoder-specific keyword options to the selected module."""
     implementation = get_encoder(encoder)
-    return implementation.encode(source, output, key, namespace, chunk_size, temp_dir)
+    return implementation.encode(source=source, output=output, **options)
 
 
-__all__ = ["CppDecoder", "EncoderModule", "available_encoders", "encode", "get_encoder"]
+__all__ = [
+    "CppDecoder",
+    "EncoderArtifacts",
+    "EncoderModule",
+    "available_encoders",
+    "encode",
+    "get_encoder",
+]

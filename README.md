@@ -73,10 +73,16 @@ C++ 内存解码代码，并实现以下标准入口：
 
 ```python
 NAME: str
-CHUNK_SIZE: int
+CLI_EPILOG: str
 
-def encode(source, output, key, namespace, chunk_size, temp_dir):
-    """生成嵌入载荷头文件，返回四项编码统计。"""
+def add_cli_arguments(parser):
+    """向通用 CLI 注册当前编码器专属参数。"""
+
+def encode_from_cli(args, source, output, namespace) -> EncoderArtifacts:
+    """解析编码器参数、执行编码并返回需要生成的附加头文件。"""
+
+def encode(source, output, **encoder_options):
+    """程序化编码入口；关键字参数由当前编码器定义。"""
 
 def cpp_decoder(namespace) -> CppDecoder:
     """返回 header、source、cmake_packages 和 cmake_libraries。"""
@@ -98,8 +104,9 @@ std::size_t size = 0;
 embedded::PayloadBuffer payload = embedded::decode_payload(data, size);
 ```
 
-新增模块后，将
-模块加入 `liloaden/encoder/__init__.py` 的 `_ENCODERS` 即可供 `--encoder` 选择。
+新增模块后，将模块加入 `liloaden/encoder/__init__.py` 的 `_ENCODERS` 即可供
+`--encoder` 选择。`--key-hex`、`--key-file`、`--chunk-size` 等参数属于
+`lzma-aes-ipv6`，由该模块动态加入帮助页；其他编码器可声明完全不同的参数。
 
 载荷编码器也可单独调用：
 

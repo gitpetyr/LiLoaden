@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from liloaden.payload_encoder import encode_file
 from liloaden.encoder import CppDecoder, available_encoders, encode, get_encoder
-from liloaden.project_generator import main
+from liloaden.project_generator import main, parse_args
 
 
 KEY_HEX = "00112233445566778899aabbccddeeff"
@@ -23,7 +23,11 @@ class GenerationTests(unittest.TestCase):
             output = root / "payload.h"
             source.write_bytes(b"registry dispatch test")
             result = encode(
-                "lzma-aes-ipv6", source, output, bytes.fromhex(KEY_HEX), chunk_size=4096
+                "lzma-aes-ipv6",
+                source,
+                output,
+                key=bytes.fromhex(KEY_HEX),
+                chunk_size=4096,
             )
             self.assertEqual(result[0], source.stat().st_size)
             self.assertTrue(output.is_file())
@@ -39,6 +43,26 @@ class GenerationTests(unittest.TestCase):
         self.assertIn(signature, decoder.source)
         self.assertIn("find_package(LibLZMA REQUIRED)", decoder.cmake_packages)
         self.assertIn("LibLZMA::LibLZMA", decoder.cmake_libraries)
+        self.assertTrue(callable(encoder.add_cli_arguments))
+        self.assertTrue(callable(encoder.encode_from_cli))
+
+    def test_project_cli_loads_selected_encoder_arguments(self) -> None:
+        arguments = [
+            "input.bin",
+            "generated",
+            "--encoder",
+            "lzma-aes-ipv6",
+            "--key-hex",
+            KEY_HEX,
+            "--chunk-size",
+            "8192",
+        ]
+
+        args = parse_args(arguments)
+
+        self.assertEqual(args.encoder, "lzma-aes-ipv6")
+        self.assertEqual(args.key_hex, KEY_HEX)
+        self.assertEqual(args.chunk_size, 8192)
 
     def test_encode_file_writes_payload_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

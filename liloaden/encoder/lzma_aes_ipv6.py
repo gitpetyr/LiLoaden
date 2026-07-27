@@ -2,15 +2,95 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..payload_encoder import CHUNK_SIZE, encode_file
 
 if TYPE_CHECKING:
-    from . import CppDecoder
+    from . import CppDecoder, EncoderArtifacts
 
 NAME = "lzma-aes-ipv6"
+CLI_EPILOG = (
+    "Example: %(prog)s input.bin generated-project --encoder lzma-aes-ipv6 "
+    "--key-hex 00112233445566778899aabbccddeeff"
+)
+
+
+def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register arguments specific to the LZMA/AES/IPv6 encoding pipeline."""
+    group = parser.add_argument_group(f"{NAME} options")
+    keys = group.add_mutually_exclusive_group(required=True)
+    keys.add_argument(
+        "--key-hex",
+        metavar="HEX",
+        help="AES key as exactly 32, 48, or 64 hexadecimal characters",
+    )
+    keys.add_argument(
+        "--key-file",
+        type=Path,
+        metavar="FILE",
+        help="file containing exactly 16, 24, or 32 raw AES key bytes",
+    )
+    group.add_argument(
+        "--chunk-size",
+        type=int,
+        default=CHUNK_SIZE,
+        metavar="BYTES",
+        help="streaming I/O chunk size; must be at least 4096 bytes",
+    )
+    group.add_argument(
+        "--temp-dir",
+        type=Path,
+        metavar="DIR",
+        help="intermediate-file directory (system temporary directory if omitted)",
+    )
+
+
+def _read_key(args: argparse.Namespace) -> bytes:
+    try:
+        key = (
+            bytes.fromhex(args.key_hex)
+            if args.key_hex is not None
+            else args.key_file.read_bytes()
+        )
+    except ValueError as exc:
+        raise ValueError("--key-hex must be a valid hexadecimal string") from exc
+    if len(key) not in (16, 24, 32):
+        raise ValueError("the AES key must contain exactly 16, 24, or 32 bytes")
+    return key
+
+
+def _key_header(key: bytes) -> str:
+    values = ", ".join(f"0x{value:02x}" for value in key)
+    return (
+        "#pragma once\n\n#include <array>\n#include <cstdint>\n\n"
+        "namespace embedded_key {\n"
+        f"inline constexpr std::array<std::uint8_t, {len(key)}> kKey{{{{{values}}}}};\n"
+        "}  // namespace embedded_key\n"
+    )
+
+
+def encode_from_cli(
+    args: argparse.Namespace,
+    source: Path,
+    output: Path,
+    namespace: str,
+) -> EncoderArtifacts:
+    """Resolve this encoder's CLI settings and generate its payload artifacts."""
+    from . import EncoderArtifacts
+
+    key = _read_key(args)
+    encode(
+        source=source,
+        output=output,
+        key=key,
+        namespace=namespace,
+        chunk_size=args.chunk_size,
+        temp_dir=args.temp_dir.resolve() if args.temp_dir else None,
+    )
+    return EncoderArtifacts(headers={"payload_key.h": _key_header(key)})
 
 
 
@@ -311,4 +391,12 @@ def cpp_decoder(namespace: str) -> CppDecoder:
     )
 
 
-__all__ = ["CHUNK_SIZE", "NAME", "cpp_decoder", "encode"]
+__all__ = [
+    "CHUNK_SIZE",
+    "CLI_EPILOG",
+    "NAME",
+    "add_cli_arguments",
+    "cpp_decoder",
+    "encode",
+    "encode_from_cli",
+]
