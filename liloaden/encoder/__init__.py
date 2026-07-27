@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
-from . import ipv6, lzma_aes_ipv6
+from . import chacha20_base85, ipv6, lzma_aes_ipv6
 
 
 @dataclass(frozen=True)
@@ -47,6 +47,7 @@ class EncoderModule(Protocol):
 
 
 _ENCODERS: dict[str, EncoderModule] = {
+    chacha20_base85.NAME: chacha20_base85,
     ipv6.NAME: ipv6,
     lzma_aes_ipv6.NAME: lzma_aes_ipv6,
 }

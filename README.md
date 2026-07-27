@@ -1,11 +1,12 @@
 # LiLoaden
 
-LiLoaden 将任意二进制文件压缩、使用 AES-GCM 加密，并生成一个可独立构建的
+LiLoaden 将任意二进制文件编码为可嵌入的 C++ 头文件，并生成一个可独立构建的
 CMake/C++ 解码工程。主入口是 `generate_cmake_project.py`。
 
-当前提供两种编码器：
+当前提供三种编码器：
 
 - `lzma-aes-ipv6`：`LZMA/XZ -> AES-GCM -> IPv6`。
+- `chacha20-base85`：`ChaCha20 -> Base85`，采用流式加密和流式 Base85 输出，适合较大的二进制文件。
 - `ipv6`：直接将二进制按 16 字节分组转换为 IPv6 地址，不压缩也不加密。
 
 ## 安装
@@ -14,7 +15,7 @@ CMake/C++ 解码工程。主入口是 `generate_cmake_project.py`。
 python3 -m pip install -r requirements.txt
 ```
 
-生成工程时必须提供 16、24 或 32 字节的 AES 密钥：
+生成工程时，默认编码器 `lzma-aes-ipv6` 必须提供 16、24 或 32 字节的 AES 密钥：
 
 ```bash
 python3 generate_cmake_project.py input.bin generated-project \
@@ -22,10 +23,21 @@ python3 generate_cmake_project.py input.bin generated-project \
   --encoder lzma-aes-ipv6
 ```
 
+使用 `chacha20-base85` 时，需要提供 32 字节 ChaCha20 密钥：
+
+```bash
+python3 generate_cmake_project.py input.bin generated-project \
+  --encoder chacha20-base85 \
+  --key-hex 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff \
+  --chunk-size 1048576
+```
+
 也可以使用原始二进制密钥文件：
 
 ```bash
 python3 generate_cmake_project.py input.bin generated-project --key-file aes.key
+python3 generate_cmake_project.py input.bin generated-project \
+  --encoder chacha20-base85 --key-file chacha20.key
 ```
 
 直接生成 IPv6 地址列表工程不需要密钥参数：
@@ -34,7 +46,8 @@ python3 generate_cmake_project.py input.bin generated-project --key-file aes.key
 python3 generate_cmake_project.py input.bin generated-project --encoder ipv6
 ```
 
-输出工程依赖 CMake 3.16+、C++17、OpenSSL Crypto 和 LibLZMA：
+`lzma-aes-ipv6` 输出工程依赖 CMake 3.16+、C++17、OpenSSL Crypto 和 LibLZMA；
+`chacha20-base85` 仅依赖 OpenSSL Crypto：
 
 ```bash
 cmake -S generated-project -B generated-project/build
@@ -69,12 +82,13 @@ generate_cmake_project.py        命令行入口
 liloaden/
   encoder/
     __init__.py                  编码器协议、注册表和统一分发入口
+    chacha20_base85.py           ChaCha20 + Base85 编码与配套 C++ 解码模块
     ipv6.py                      原始二进制与 IPv6 地址列表互转模块
-    lzma_aes_ipv6.py             Python 编码与配套 C++ 解码模块
-  project_generator.py          通用 CMake 工程生成逻辑
-  payload_encoder.py            流式压缩、加密及 IPv6 头文件编码
+    lzma_aes_ipv6.py             LZMA + AES-GCM + IPv6 编码与配套 C++ 解码模块
+  project_generator.py           通用 CMake 工程生成逻辑
+  payload_encoder.py             流式压缩、加密及 IPv6 头文件编码
 tools/
-  legacy_payload_encoder.py     旧版 v1 协议工具，不参与主流程
+  legacy_payload_encoder.py      旧版 v1 协议工具，不参与主流程
 tests/                           自动化测试
 ```
 
@@ -117,8 +131,13 @@ embedded::PayloadBuffer payload = embedded::decode_payload(data, size);
 ```
 
 新增模块后，将模块加入 `liloaden/encoder/__init__.py` 的 `_ENCODERS` 即可供
-`--encoder` 选择。`--key-hex`、`--key-file`、`--chunk-size` 等参数属于
-`lzma-aes-ipv6`，由该模块动态加入帮助页；其他编码器可声明完全不同的参数。
+`--encoder` 选择。`--key-hex`、`--key-file`、`--chunk-size` 等参数由各编码器
+按需动态加入帮助页。
+
+其中 `chacha20-base85` 的实现针对大文件做了两点优化：
+
+- Python 侧按块读取输入并直接流式加密，不落地中间密文文件。
+- Base85 头文件按固定大小字符串分片输出，避免一次性构造超大内存字符串。
 
 载荷编码器也可单独调用：
 

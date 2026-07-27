@@ -17,6 +17,11 @@ PAYLOAD_NAMESPACE = "embedded_payload"
 CMAKE_TEMPLATE = r'''cmake_minimum_required(VERSION 3.16)
 project(embedded_payload_decoder LANGUAGES CXX)
 
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
+endif()
+
 {packages}
 
 add_executable(payload_decoder
@@ -46,6 +51,8 @@ if(MSVC)
     target_compile_options(payload_decoder PRIVATE /W4 /permissive-)
 else()
     target_compile_options(payload_decoder PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(payload_decoder PRIVATE "$<$<CONFIG:Release>:-g0>")
+    target_link_options(payload_decoder PRIVATE "$<$<CONFIG:Release>:-s>")
 endif()
 '''
 
