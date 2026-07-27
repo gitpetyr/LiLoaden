@@ -37,14 +37,49 @@ generated-project/build/payload_decoder restored.bin
 generate_cmake_project.py        命令行入口
 liloaden/
   encoder/
-    __init__.py                  编码器注册表和统一 encode() 入口
-    lzma_aes_ipv6.py             LZMA/AES-GCM/IPv6 编码器模块
-  project_generator.py          CMake 工程生成逻辑和 C++ 模板
+    __init__.py                  编码器协议、注册表和统一分发入口
+    lzma_aes_ipv6.py             Python 编码与配套 C++ 解码模块
+  project_generator.py          通用 CMake 工程生成逻辑
   payload_encoder.py            流式压缩、加密及 IPv6 头文件编码
 tools/
   legacy_payload_encoder.py     旧版 v1 协议工具，不参与主流程
 tests/                           自动化测试
 ```
+
+## 编码器模块接口
+
+每个 `liloaden/encoder/<name>.py` 模块同时维护二进制编码逻辑和对应的
+C++ 内存解码代码，并实现以下标准入口：
+
+```python
+NAME: str
+CHUNK_SIZE: int
+
+def encode(source, output, key, namespace, chunk_size, temp_dir):
+    """生成嵌入载荷头文件，返回四项编码统计。"""
+
+def cpp_decoder(namespace) -> CppDecoder:
+    """返回 header、source、cmake_packages 和 cmake_libraries。"""
+```
+
+C++ 端统一声明 `embedded::PayloadBuffer` 与以下精简接口：
+
+```cpp
+embedded::PayloadBuffer decode_payload(char*& data, std::size_t& size);
+```
+
+`data` 传出解码后内存首地址，`size` 传出有效字节数，返回的
+`PayloadBuffer` 持有该内存并在析构时释放。`data` 是借用指针，仅在返回的
+`PayloadBuffer` 未析构、未被移动期间有效；调用方不得单独释放。典型调用：
+
+```cpp
+char* data = nullptr;
+std::size_t size = 0;
+embedded::PayloadBuffer payload = embedded::decode_payload(data, size);
+```
+
+新增模块后，将
+模块加入 `liloaden/encoder/__init__.py` 的 `_ENCODERS` 即可供 `--encoder` 选择。
 
 载荷编码器也可单独调用：
 

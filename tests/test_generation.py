@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from liloaden.payload_encoder import encode_file
-from liloaden.encoder import available_encoders, encode
+from liloaden.encoder import CppDecoder, available_encoders, encode, get_encoder
 from liloaden.project_generator import main
 
 
@@ -27,6 +27,18 @@ class GenerationTests(unittest.TestCase):
             )
             self.assertEqual(result[0], source.stat().st_size)
             self.assertTrue(output.is_file())
+
+    def test_encoder_module_exposes_cpp_decoder_contract(self) -> None:
+        encoder = get_encoder("lzma-aes-ipv6")
+        decoder = encoder.cpp_decoder("embedded_payload")
+
+        self.assertEqual(encoder.NAME, "lzma-aes-ipv6")
+        self.assertIsInstance(decoder, CppDecoder)
+        signature = "PayloadBuffer decode_payload(char*& data, std::size_t& size)"
+        self.assertIn(signature, decoder.header)
+        self.assertIn(signature, decoder.source)
+        self.assertIn("find_package(LibLZMA REQUIRED)", decoder.cmake_packages)
+        self.assertIn("LibLZMA::LibLZMA", decoder.cmake_libraries)
 
     def test_encode_file_writes_payload_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -79,10 +91,18 @@ class GenerationTests(unittest.TestCase):
             }
             self.assertEqual(actual, expected)
 
+            generated_cmake = (output / "CMakeLists.txt").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("find_package(OpenSSL REQUIRED COMPONENTS Crypto)", generated_cmake)
+            self.assertIn("find_package(LibLZMA REQUIRED)", generated_cmake)
+            self.assertIn("OpenSSL::Crypto LibLZMA::LibLZMA", generated_cmake)
+
             generated_main = (output / "src/main.cpp").read_text(encoding="utf-8")
             self.assertNotIn("std::cout", generated_main)
             self.assertNotIn("std::cerr", generated_main)
             self.assertNotIn("<iostream>", generated_main)
+            self.assertIn("decode_payload(data, size)", generated_main)
 
             generated_decoder = (output / "src/payload_decoder.cpp").read_text(
                 encoding="utf-8"

@@ -15,7 +15,7 @@ try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 except ImportError as exc:
     raise SystemExit(
-        "缺少依赖 cryptography，请运行: python -m pip install -r requirements.txt"
+        "Missing dependency 'cryptography'. Run: python -m pip install -r requirements.txt"
     ) from exc
 
 MAGIC = b"LIL1"
@@ -25,19 +25,22 @@ AAD = b"LiLoaden:AES-GCM:LZMA:IPv6:v1"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="使用 AES-GCM 加密二进制文件，经 LZMA 压缩后生成 C++ 头文件。"
+        description="Encrypt a binary file with AES-GCM, compress it with LZMA, and generate a C++ header.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog="Example: %(prog)s input.bin payload.h --key-file aes.key",
     )
-    parser.add_argument("input", type=Path, help="输入二进制文件")
-    parser.add_argument("output", type=Path, help="输出 .h 文件")
+    parser.add_argument("input", type=Path, metavar="INPUT", help="binary input file")
+    parser.add_argument("output", type=Path, metavar="OUTPUT_HEADER", help="generated C++ header path")
     keys = parser.add_mutually_exclusive_group(required=True)
-    keys.add_argument("--key-hex", help="十六进制 AES 密钥（32/48/64 个十六进制字符）")
+    keys.add_argument("--key-hex", metavar="HEX", help="AES key as exactly 32, 48, or 64 hexadecimal characters")
     keys.add_argument(
-        "--key-file", type=Path, help="包含 16、24 或 32 个原始字节的 AES 密钥文件"
+        "--key-file", type=Path, metavar="FILE", help="file containing exactly 16, 24, or 32 raw AES key bytes"
     )
     parser.add_argument(
         "--namespace",
         default="liloaden_payload",
-        help="生成的 C++ 命名空间（默认: liloaden_payload）",
+        metavar="CXX_NAMESPACE",
+        help="C++ namespace for generated constants; nested names such as foo::bar are accepted",
     )
     return parser.parse_args()
 
@@ -47,18 +50,18 @@ def read_key(args: argparse.Namespace) -> bytes:
         try:
             key = bytes.fromhex(args.key_hex)
         except ValueError as exc:
-            raise ValueError("--key-hex 必须是有效的十六进制字符串") from exc
+            raise ValueError("--key-hex must be a valid hexadecimal string") from exc
     else:
         key = args.key_file.read_bytes()
     if len(key) not in (16, 24, 32):
-        raise ValueError("AES 密钥必须为 16、24 或 32 字节")
+        raise ValueError("the AES key must contain exactly 16, 24, or 32 bytes")
     return key
 
 
 def validate_namespace(namespace: str) -> None:
     identifier = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
     if not all(identifier.fullmatch(part) for part in namespace.split("::")):
-        raise ValueError("--namespace 必须是合法的 C++ 命名空间，例如 foo 或 foo::bar")
+        raise ValueError("--namespace must be a valid C++ namespace, for example foo or foo::bar")
 
 
 def encode_payload(plaintext: bytes, key: bytes) -> bytes:
@@ -81,11 +84,11 @@ def verify(addresses: list[str], compressed_size: int, key: bytes, expected: byt
     encoded = b"".join(ipaddress.IPv6Address(item).packed for item in addresses)
     envelope = lzma.decompress(encoded[:compressed_size], format=lzma.FORMAT_XZ)
     if envelope[:4] != MAGIC or envelope[4] != len(key):
-        raise RuntimeError("内部校验失败：数据头无效")
+        raise RuntimeError("internal verification failed: invalid envelope header")
     nonce = envelope[5 : 5 + NONCE_SIZE]
     actual = AESGCM(key).decrypt(nonce, envelope[5 + NONCE_SIZE :], AAD)
     if actual != expected:
-        raise RuntimeError("内部校验失败：还原数据与输入不一致")
+        raise RuntimeError("internal verification failed: restored data differs from input")
 
 
 def render_header(
@@ -138,11 +141,11 @@ def main() -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(header, encoding="utf-8", newline="\n")
     except (OSError, ValueError, RuntimeError, lzma.LZMAError) as exc:
-        print(f"错误: {exc}", file=sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
         return 1
     print(
-        f"已生成 {args.output}: {len(plaintext)} 字节 -> "
-        f"{len(compressed)} 字节 -> {len(addresses)} 个 IPv6 地址"
+        f"Generated {args.output}: {len(plaintext)} bytes -> "
+        f"{len(compressed)} bytes -> {len(addresses)} IPv6 addresses"
     )
     return 0
 

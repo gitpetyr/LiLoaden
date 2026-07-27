@@ -1,25 +1,50 @@
-"""Encoder registry and stable dispatch entry point."""
+"""Encoder module contract, registry, and stable dispatch entry points."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from . import lzma_aes_ipv6
 
 
-class Encoder(Protocol):
+@dataclass(frozen=True)
+class CppDecoder:
+    """Files and build settings required by an encoder's C++ decoder."""
+
+    header: str
+    source: str
+    cmake_packages: tuple[str, ...] = ()
+    cmake_libraries: tuple[str, ...] = ()
+
+
+class EncoderModule(Protocol):
+    NAME: str
+    CHUNK_SIZE: int
+
     def encode(
         self, source: Path, output: Path, key: bytes, namespace: str,
         chunk_size: int, temp_dir: Path | None,
     ) -> tuple[int, int, int, int]: ...
 
+    def cpp_decoder(self, namespace: str) -> CppDecoder: ...
 
-_ENCODERS: dict[str, Encoder] = {"lzma-aes-ipv6": lzma_aes_ipv6}
+
+_ENCODERS: dict[str, EncoderModule] = {lzma_aes_ipv6.NAME: lzma_aes_ipv6}
 
 
 def available_encoders() -> tuple[str, ...]:
     return tuple(sorted(_ENCODERS))
+
+
+def get_encoder(name: str) -> EncoderModule:
+    """Return a module implementing the complete Python/C++ encoder contract."""
+    try:
+        return _ENCODERS[name]
+    except KeyError as exc:
+        choices = ", ".join(available_encoders())
+        raise ValueError(f"unknown encoder {name!r}; available encoders: {choices}") from exc
 
 
 def encode(
@@ -32,12 +57,8 @@ def encode(
     temp_dir: Path | None = None,
 ) -> tuple[int, int, int, int]:
     """Encode a file through the selected encoder's common entry point."""
-    try:
-        implementation = _ENCODERS[encoder]
-    except KeyError as exc:
-        choices = ", ".join(available_encoders())
-        raise ValueError(f"未知编码器 {encoder!r}；可用编码器: {choices}") from exc
+    implementation = get_encoder(encoder)
     return implementation.encode(source, output, key, namespace, chunk_size, temp_dir)
 
 
-__all__ = ["available_encoders", "encode"]
+__all__ = ["CppDecoder", "EncoderModule", "available_encoders", "encode", "get_encoder"]

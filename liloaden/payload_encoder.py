@@ -16,7 +16,7 @@ from typing import BinaryIO
 try:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 except ImportError as exc:
-    raise SystemExit("缺少 cryptography，请运行: python -m pip install -r requirements.txt") from exc
+    raise SystemExit("Missing dependency 'cryptography'. Run: python -m pip install -r requirements.txt") from exc
 
 MAGIC = b"LIL2"
 AAD = b"LiLoaden:LZMA:AES-GCM:LZMA:IPv6:v2"
@@ -25,16 +25,18 @@ CHUNK_SIZE = 1024 * 1024
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="流式执行 LZMA -> AES-GCM -> LZMA，并生成 IPv6 C++ 头文件。"
+        description="Stream data through LZMA, AES-GCM, and LZMA, then emit an IPv6 C++ header.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog="Example: %(prog)s input.bin payload.h --key-file aes.key",
     )
-    parser.add_argument("input", type=Path, help="输入二进制文件")
-    parser.add_argument("output", type=Path, help="输出 .h 文件")
+    parser.add_argument("input", type=Path, metavar="INPUT", help="binary input file")
+    parser.add_argument("output", type=Path, metavar="OUTPUT_HEADER", help="generated C++ header path")
     key = parser.add_mutually_exclusive_group(required=True)
-    key.add_argument("--key-hex", help="32/48/64 个十六进制字符的 AES 密钥")
-    key.add_argument("--key-file", type=Path, help="16/24/32 字节原始 AES 密钥文件")
-    parser.add_argument("--namespace", default="liloaden_payload")
-    parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE)
-    parser.add_argument("--temp-dir", type=Path, help="中间文件目录，需有足够可用空间")
+    key.add_argument("--key-hex", metavar="HEX", help="AES key as exactly 32, 48, or 64 hexadecimal characters")
+    key.add_argument("--key-file", type=Path, metavar="FILE", help="file containing exactly 16, 24, or 32 raw AES key bytes")
+    parser.add_argument("--namespace", default="liloaden_payload", metavar="CXX_NAMESPACE", help="C++ namespace for generated constants; nested names such as foo::bar are accepted")
+    parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE, metavar="BYTES", help="streaming I/O chunk size; must be at least 4096 bytes")
+    parser.add_argument("--temp-dir", type=Path, metavar="DIR", help="intermediate-file directory (system temporary directory if omitted)")
     return parser.parse_args()
 
 
@@ -42,20 +44,20 @@ def load_key(args: argparse.Namespace) -> bytes:
     try:
         key = bytes.fromhex(args.key_hex) if args.key_hex is not None else args.key_file.read_bytes()
     except ValueError as exc:
-        raise ValueError("--key-hex 不是有效的十六进制字符串") from exc
+        raise ValueError("--key-hex must be a valid hexadecimal string") from exc
     if len(key) not in (16, 24, 32):
-        raise ValueError("AES 密钥必须为 16、24 或 32 字节")
+        raise ValueError("the AES key must contain exactly 16, 24, or 32 bytes")
     return key
 
 
 def validate(args: argparse.Namespace) -> None:
     identifier = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
     if not all(identifier.fullmatch(part) for part in args.namespace.split("::")):
-        raise ValueError("--namespace 不是合法的 C++ 命名空间")
+        raise ValueError("--namespace must be a valid C++ namespace, for example foo or foo::bar")
     if args.chunk_size < 4096:
-        raise ValueError("--chunk-size 不能小于 4096")
+        raise ValueError("--chunk-size must be at least 4096")
     if not args.input.is_file():
-        raise ValueError(f"输入文件不存在或不是普通文件: {args.input}")
+        raise ValueError(f"input does not exist or is not a regular file: {args.input}")
 
 
 def copy_chunks(source: BinaryIO, target: BinaryIO, chunk_size: int) -> None:
@@ -135,14 +137,14 @@ def encode_file(
     temp_dir: Path | None = None,
 ) -> tuple[int, int, int, int]:
     if len(key) not in (16, 24, 32):
-        raise ValueError("AES 密钥必须为 16、24 或 32 字节")
+        raise ValueError("the AES key must contain exactly 16, 24, or 32 bytes")
     identifier = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
     if not all(identifier.fullmatch(part) for part in namespace.split("::")):
-        raise ValueError("namespace 不是合法的 C++ 命名空间")
+        raise ValueError("namespace must be a valid C++ namespace")
     if chunk_size < 4096:
-        raise ValueError("chunk_size 不能小于 4096")
+        raise ValueError("chunk_size must be at least 4096")
     if not source.is_file():
-        raise ValueError(f"输入文件不存在或不是普通文件: {source}")
+        raise ValueError(f"input does not exist or is not a regular file: {source}")
 
     original_size = source.stat().st_size
     if temp_dir:
@@ -173,11 +175,11 @@ def main() -> int:
             args.input, args.output, key, args.namespace, args.chunk_size, args.temp_dir
         )
     except (OSError, ValueError, lzma.LZMAError) as exc:
-        print(f"错误: {exc}", file=sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
         return 1
     print(
-        f"已生成 {args.output}: {original_size} -> {inner_size} -> "
-        f"{outer_size} 字节，{count} 个 IPv6 地址"
+        f"Generated {args.output}: {original_size} -> {inner_size} -> "
+        f"{outer_size} bytes, {count} IPv6 addresses"
     )
     return 0
 
