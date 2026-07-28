@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "liloaden"
+dynamic = ["version"]
+description = "Encode binary payloads into embeddable C++ headers and generate standalone CMake decoder projects."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "LiLoaden Authors" }
+]
+keywords = ["cmake", "cpp", "payload", "encoder", "generator"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Build Tools",
+  "Topic :: Utilities"
+]
+dependencies = [
+  "cryptography>=42,<46"
+]
+
+[project.urls]
+Homepage = "https://github.com/gitpetyr/LiLoaden"
+Repository = "https://github.com/gitpetyr/LiLoaden"
+Issues = "https://github.com/gitpetyr/LiLoaden/issues"
+
+[project.scripts]
+liloaden = "liloaden.project_generator:main"
+liloaden-payload-encoder = "liloaden.payload_encoder:main"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["liloaden*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "liloaden.__version__" }

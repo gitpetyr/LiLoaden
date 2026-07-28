@@ -1,7 +1,7 @@
 # LiLoaden
 
 LiLoaden 将任意二进制文件编码为可嵌入的 C++ 头文件，并生成一个可独立构建的
-CMake/C++ 解码工程。主入口是 `generate_cmake_project.py`。
+CMake/C++ 解码工程。主入口是 `liloaden`（或 `python3 -m liloaden`），并保留 `generate_cmake_project.py` 兼容脚本。
 
 当前提供三种编码器：
 
@@ -11,14 +11,22 @@ CMake/C++ 解码工程。主入口是 `generate_cmake_project.py`。
 
 ## 安装
 
+作为 pip 包安装：
+
 ```bash
-python3 -m pip install -r requirements.txt
+python3 -m pip install liloaden
+```
+
+本地开发安装：
+
+```bash
+python3 -m pip install -e .
 ```
 
 生成工程时，默认编码器 `lzma-aes-ipv6` 必须提供 16、24 或 32 字节的 AES 密钥：
 
 ```bash
-python3 generate_cmake_project.py input.bin generated-project \
+liloaden input.bin generated-project \
   --key-hex 00112233445566778899aabbccddeeff \
   --encoder lzma-aes-ipv6
 ```
@@ -26,7 +34,7 @@ python3 generate_cmake_project.py input.bin generated-project \
 使用 `chacha20-base85` 时，需要提供 32 字节 ChaCha20 密钥：
 
 ```bash
-python3 generate_cmake_project.py input.bin generated-project \
+liloaden input.bin generated-project \
   --encoder chacha20-base85 \
   --key-hex 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff \
   --chunk-size 1048576
@@ -35,15 +43,15 @@ python3 generate_cmake_project.py input.bin generated-project \
 也可以使用原始二进制密钥文件：
 
 ```bash
-python3 generate_cmake_project.py input.bin generated-project --key-file aes.key
-python3 generate_cmake_project.py input.bin generated-project \
+liloaden input.bin generated-project --key-file aes.key
+liloaden input.bin generated-project \
   --encoder chacha20-base85 --key-file chacha20.key
 ```
 
 直接生成 IPv6 地址列表工程不需要密钥参数：
 
 ```bash
-python3 generate_cmake_project.py input.bin generated-project --encoder ipv6
+liloaden input.bin generated-project --encoder ipv6
 ```
 
 `lzma-aes-ipv6` 输出工程依赖 CMake 3.16+、C++17、OpenSSL Crypto 和 LibLZMA；
@@ -142,7 +150,7 @@ embedded::PayloadBuffer payload = embedded::decode_payload(data, size);
 载荷编码器也可单独调用：
 
 ```bash
-python3 -m liloaden.payload_encoder input.bin payload.h \
+liloaden-payload-encoder input.bin payload.h \
   --key-hex 00112233445566778899aabbccddeeff
 ```
 
@@ -150,4 +158,13 @@ python3 -m liloaden.payload_encoder input.bin payload.h \
 
 ```bash
 python3 -m unittest discover -s tests
+```
+
+
+也支持：
+
+```bash
+python3 -m liloaden input.bin generated-project --encoder ipv6
+python3 -m liloaden.payload_encoder input.bin payload.h \
+  --key-hex 00112233445566778899aabbccddeeff
 ```
