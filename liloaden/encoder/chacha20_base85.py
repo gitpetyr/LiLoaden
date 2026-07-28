@@ -84,6 +84,24 @@ def _key_header(key: bytes) -> str:
     )
 
 
+def _cpp_string_literal(text: str) -> str:
+    """Return concatenated C++ string literals with no token containing '??'."""
+    if not text:
+        return '""'
+
+    segments: list[str] = []
+    current: list[str] = []
+    for char in text:
+        if char == "?" and current and current[-1] == "?":
+            segments.append("".join(current))
+            current = [char]
+        else:
+            current.append(char)
+    if current:
+        segments.append("".join(current))
+    return "".join(f'"{segment}"' for segment in segments)
+
+
 class _Base85LiteralWriter:
     def __init__(self, header: TextIO, chars_per_literal: int) -> None:
         if chars_per_literal <= 0 or chars_per_literal % 5 != 0:
@@ -121,8 +139,8 @@ class _Base85LiteralWriter:
             del self._encoded_buffer[: self._chars_per_literal]
 
     def _emit_literal(self, literal: bytes) -> None:
-        self._header.write(f'    "{literal.decode("ascii")}",\n')
-
+        encoded = _cpp_string_literal(literal.decode("ascii"))
+        self._header.write(f"    {encoded},\n")
 
 def _write_base85_header(
     source: Path,

